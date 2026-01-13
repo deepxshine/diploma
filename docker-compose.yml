@@ -1,0 +1,20 @@
+services:
+  deepstream-app:
+    build: .
+    container_name: deepstream-pipeline
+    runtime: nvidia
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - ./main.py:/app/main.py
+      - ./augmented:/app/augmented
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    devices:
+      - /dev/dri:/dev/dri
+    ipc: host
+    shm_size: '2gb'
+    privileged: true
+    stdin_open: true
+    tty: true
