@@ -45,7 +45,6 @@ def run_benchmark():
     print("\n" + "="*30)
     print(f"РЕЗУЛЬТАТЫ (RTX 4060TI):")
     print(f"Средняя задержка (Latency): {avg_latency:.3f} мс")
-    print(f"Теоретический FPS: {fps:.0f}")
     print("="*30 + "\n")
 
     # 5. ДЕМОНСТРАЦИЯ НА РЕАЛЬНОМ ИЗОБРАЖЕНИИ
