@@ -157,6 +157,15 @@ def bus_call(bus, message, loop):
     return True
 
 
+def create_element(factory_name, element_name):
+    """Создание элемента с обработкой ошибок"""
+    element = Gst.ElementFactory.make(factory_name, element_name)
+    if element is None:
+        print(f"❌ Не удалось создать элемент: {factory_name} ({element_name})")
+        return None
+    return element
+
+
 def create_pipeline():
     """Создание пайплайна с учетом Docker окружения"""
     global pipeline
@@ -166,10 +175,16 @@ def create_pipeline():
     print(f"Docker mode: {IS_DOCKER}")
     print("=" * 60)
     
+    # Создаем конвейер
     pipeline = Gst.Pipeline()
+    if pipeline is None:
+        print("❌ Не удалось создать конвейер")
+        return None
     
     # 1. AppSrc
-    appsrc = Gst.ElementFactory.make("appsrc", "source")
+    appsrc = create_element("appsrc", "source")
+    if not appsrc:
+        return None
     caps = Gst.Caps.from_string(
         f"video/x-raw,format=RGBA,width={WIDTH},height={HEIGHT},framerate={FPS}/1"
     )
@@ -179,42 +194,81 @@ def create_pipeline():
     appsrc.set_property("is-live", True)
     
     # 2. nvvideoconvert
-    nvvidconv_src = Gst.ElementFactory.make("nvvideoconvert", "uploader")
+    nvvidconv_src = create_element("nvvideoconvert", "uploader")
+    if not nvvidconv_src:
+        return None
     
-    # 3. nvstreammux
-    streammux = Gst.ElementFactory.make("nvstreammux", "muxer")
+    # 3. streammux (попробуем разные варианты)
+    streammux = None
+    streammux_names = ['nvstreammux', 'streammux']
+    
+    for name in streammux_names:
+        streammux = create_element(name, "muxer")
+        if streammux:
+            print(f"  Использую элемент: {name}")
+            break
+    
+    if not streammux:
+        print("❌ Не удалось создать streammux элемент")
+        print("   Попробуйте установить DeepStream SDK или проверьте доступные элементы:")
+        print("   gst-inspect-1.0 | grep -i streammux")
+        return None
+    
+    # Настраиваем streammux
     streammux.set_property('width', WIDTH)
     streammux.set_property('height', HEIGHT)
     streammux.set_property('batch-size', 1)
     streammux.set_property('batched-push-timeout', 40000)
     
-    # 4. nvvideoconvert
-    nvvidconv_out = Gst.ElementFactory.make("nvvideoconvert", "converter")
+    # 4. nvvideoconvert для вывода
+    nvvidconv_out = create_element("nvvideoconvert", "converter")
+    if not nvvidconv_out:
+        return None
     
-    # 5. nvosd
-    nvosd = Gst.ElementFactory.make("nvdsosd", "osd")
-    nvosd.set_property('display-text', True)
+    # 5. nvosd (опционально)
+    nvosd = create_element("nvdsosd", "osd")
+    if nvosd:
+        nvosd.set_property('display-text', True)
+        print("  ✓ nvdsosd создан")
+    else:
+        print("  ⚠️ nvdsosd не доступен, продолжаем без него")
+        # Создаем пустой элемент для пропуска
+        nvosd = create_element("identity", "osd_passthrough")
+        if not nvosd:
+            return None
     
     # 6. Sink - разный в зависимости от окружения
+    sink = None
     if IS_DOCKER:
         print("  Использую fakesink для Docker")
-        sink = Gst.ElementFactory.make("fakesink", "sink")
-        sink.set_property("sync", False)
-        sink.set_property("qos", False)
+        sink = create_element("fakesink", "sink")
+        if sink:
+            sink.set_property("sync", False)
+            sink.set_property("qos", False)
     else:
-        print("  Использую nveglglessink для локального запуска")
-        sink = Gst.ElementFactory.make("nveglglessink", "sink")
-        sink.set_property("sync", False)
+        # Пробуем разные sink'и
+        sink_names = ['nveglglessink', 'nv3dsink', 'xvimagesink', 'autovideosink']
+        
+        for name in sink_names:
+            sink = create_element(name, "sink")
+            if sink:
+                print(f"  Использую sink: {name}")
+                sink.set_property("sync", False)
+                break
+        
+        if not sink:
+            print("❌ Не удалось создать sink элемент")
+            return None
     
-    # Добавляем элементы
+    # Добавляем элементы в конвейер
     elements = [appsrc, nvvidconv_src, streammux, nvvidconv_out, nvosd, sink]
     
     for element in elements:
         if element:
             pipeline.add(element)
-            print(f"  ✓ {element.get_factory().get_name()}")
+            print(f"  ✓ {element.get_factory().get_name()} ({element.get_name()})")
     
-    # Линковка
+    # Линковка элементов
     print("\nЛинковка элементов...")
     
     # appsrc -> nvvidconv_src
@@ -223,12 +277,21 @@ def create_pipeline():
         return None
     
     # nvvidconv_src -> streammux
-    sinkpad = streammux.get_request_pad("sink_0")
     srcpad = nvvidconv_src.get_static_pad("src")
-    if srcpad and sinkpad:
-        srcpad.link(sinkpad)
-    else:
-        print("❌ nvvidconv_src -> streammux")
+    if not srcpad:
+        print("❌ Не удалось получить src pad у nvvidconv_src")
+        return None
+    
+    # Запрашиваем sink pad у streammux
+    sinkpad = streammux.get_request_pad("sink_0")
+    if not sinkpad:
+        print("❌ Не удалось запросить sink_0 pad у streammux")
+        return None
+    
+    # Соединяем pads
+    link_result = srcpad.link(sinkpad)
+    if link_result != Gst.PadLinkReturn.OK:
+        print(f"❌ Ошибка линковки nvvidconv_src -> streammux: {link_result}")
         return None
     
     # streammux -> nvvidconv_out -> nvosd -> sink
@@ -282,10 +345,26 @@ def check_gpu():
     except FileNotFoundError:
         print("⚠️ GStreamer не найден")
     
+    # Проверяем доступные GStreamer элементы
+    try:
+        print("\nПроверка доступных элементов GStreamer:")
+        elements_to_check = ['nvstreammux', 'nvvideoconvert', 'nveglglessink']
+        for element in elements_to_check:
+            result = subprocess.run(['gst-inspect-1.0', element], 
+                                  capture_output=True, 
+                                  text=True)
+            if result.returncode == 0:
+                print(f"  ✓ {element} доступен")
+            else:
+                print(f"  ⚠️ {element} не найден")
+    except:
+        print("  ⚠️ Не удалось проверить элементы GStreamer")
+    
     # Проверяем папку с изображениями
     if os.path.exists(IMAGE_FOLDER):
-        num_images = len(glob.glob(os.path.join(IMAGE_FOLDER, "*.jpg")))
-        num_images += len(glob.glob(os.path.join(IMAGE_FOLDER, "*.png")))
+        num_images = 0
+        for ext in IMAGE_EXTENSIONS:
+            num_images += len(glob.glob(os.path.join(IMAGE_FOLDER, ext)))
         print(f"✓ Папка '{IMAGE_FOLDER}': {num_images} изображений")
     else:
         print(f"⚠️ Папка '{IMAGE_FOLDER}' не найдена")
@@ -334,16 +413,22 @@ def main():
     print("Запуск пайплайна...")
     print("=" * 60)
     
-    pipeline.set_state(Gst.State.PLAYING)
+    # Устанавливаем состояние PLAYING
+    ret = pipeline.set_state(Gst.State.PLAYING)
+    if ret == Gst.StateChangeReturn.FAILURE:
+        print("❌ Ошибка при запуске пайплайна")
+        return
     
-    print("\nПапплайн запущен!")
+    print("\nПайплайн запущен!")
     print("Управление: Ctrl+C для остановки")
     print("-" * 60)
     
     try:
         loop.run()
     except KeyboardInterrupt:
-        print("\nОстановка...")
+        print("\nОстановка по запросу пользователя...")
+    except Exception as e:
+        print(f"\nОшибка в главном цикле: {e}")
     
     # Очистка
     pipeline.set_state(Gst.State.NULL)
