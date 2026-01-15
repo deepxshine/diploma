@@ -1,18 +1,22 @@
 from ultralytics import YOLO
+import os
 
-# Загружаем модель с нашей структурой и адаптированными весами
-model = YOLO('yolov8-rail.yaml').load('yolov8n_mono.pt')
+dataset_path = os.path.abspath('dataset')
 
-# Запуск обучения
-results = model.train(
-    data='rail_data.yaml',
-    epochs=100,
-    imgsz=(512, 256), # Ваша размерность
-    batch=16,
-    augment=True,
-    mosaic=1.0,      # Помогает при малом датасете
-    freeze=10,       # Замораживаем первые 10 слоев (бэкбон)
-    device=0         # GPU
-)
+model = YOLO('yolov8-rail.yaml')
+model.load('yolov8n_mono.pt')
 
-model.export(format='engine', device=0, half=True, simplify=True)
+if __name__ == '__main__':
+	model.train(
+		data=f'{dataset_path}/data.yaml',
+		epochs=100,
+		imgsz=(512, 256),
+		batch=5,
+		device='mps',
+		project='rail_project',
+		name='mono_mvp_v2',
+		rect=True,
+		nbs=64,
+		plots=True,
+		overlap_mask=False,
+	)

@@ -209,3 +209,7 @@ __marimo__/
 .idea
 .vscode
 dataset
+*.zip
+dataset*/
+.DS_Store
+rail_project/
