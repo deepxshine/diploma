@@ -43,7 +43,7 @@ def run_benchmark():
     fps = 1000 / avg_latency
 
     print("\n" + "="*30)
-    print(f"РЕЗУЛЬТАТЫ (RTX 4080):")
+    print(f"РЕЗУЛЬТАТЫ (RTX 4060TI):"
     print(f"Средняя задержка (Latency): {avg_latency:.3f} мс")
     print(f"Теоретический FPS: {fps:.0f}")
     print("="*30 + "\n")
@@ -78,7 +78,7 @@ def run_benchmark():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
             print(f"Обнаружен дефект: {conf:.2f}")
 
-    cv2.imshow("Final Test RTX 4080", orig_img)
+    cv2.imshow("Final Test RTX 4060TI", orig_img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
